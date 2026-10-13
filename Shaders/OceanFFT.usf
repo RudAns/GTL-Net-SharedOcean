@@ -1,0 +1,133 @@
+// GPU path for the visual band (report ch.9 "GTLOceanGPU"): spectrum evolution, inverse FFT (rows, then
+// columns, in group shared memory) and a finalise pass that writes the same textures the CPU path writes.
+// Indexing and conventions match OceanFFT.cpp exactly, so switching paths leaves the picture unchanged.
+
+#include "/Engine/Public/Platform.ush"
+
+static const float OCEAN_TWO_PI = 6.28318530718;
+
+uint N;
+float Patch;
+float Time;
+float Omega0;
+float Choppiness;
+float Dt;
+float FoamThreshold;
+float FoamGain;
+float FoamDecay;
+uint FoamOn;
+uint Vertical;
+
+Texture2D<float4> H0;          // (h0(k).re, h0(k).im, conj(h0(-k)).re, conj(h0(-k)).im)
+Texture2D<float4> InA;
+Texture2D<float4> InB;
+RWTexture2D<float4> OutA;      // (F1.re, F1.im, F2.re, F2.im)
+RWTexture2D<float4> OutB;      // (F3.re, F3.im, F4.re, F4.im)
+Texture2D<float4> SrcA;
+Texture2D<float4> SrcB;
+RWTexture2D<float4> DstA;
+RWTexture2D<float4> DstB;
+RWTexture2D<float4> OutDisp;   // (lambda Dx, lambda Dy, h, foam)
+RWTexture2D<float4> OutDeriv;  // (dh/dx, dh/dy, lambda dDx/dx, lambda dDy/dy)
+RWTexture2D<float> Foam;
+
+float2 CMul(float2 a, float2 b) { return float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+float2 MulI(float2 a) { return float2(-a.y, a.x); }
+
+[numthreads(8, 8, 1)]
+void SpectrumCS(uint3 Id : SV_DispatchThreadID)
+{
+	if (Id.x >= N || Id.y >= N) return;
+	const int I = (int)Id.x, J = (int)Id.y, Nn = (int)N;
+	const float Kx = OCEAN_TWO_PI * (I < Nn / 2 ? I : I - Nn) / Patch;
+	const float Ky = OCEAN_TWO_PI * (J < Nn / 2 ? J : J - Nn) / Patch;
+	const float K = sqrt(Kx * Kx + Ky * Ky);
+	const float4 H0v = H0[Id.xy];
+	if (K < 1e-6 || all(H0v == 0))
+	{
+		OutA[Id.xy] = 0;
+		OutB[Id.xy] = 0;
+		return;
+	}
+	// quantised dispersion: every component repeats with the loop period
+	const float W = max(1.0, floor(sqrt(9.81 * K) / Omega0)) * Omega0;
+	const float Ph = fmod(W * Time, OCEAN_TWO_PI);
+	const float2 E = float2(cos(Ph), sin(Ph));
+	const float2 H = CMul(H0v.xy, E) + CMul(H0v.zw, float2(E.x, -E.y));
+	const float Nx = Kx / K, Ny = Ky / K;
+	const float2 Dx = MulI(H) * Nx, Dy = MulI(H) * Ny;
+	const float2 F1 = H + MulI(Dx);
+	const float2 F2 = Dy + MulI(MulI(H) * Kx);
+	const float2 F3 = MulI(H) * Ky + MulI(H * (-Kx * Nx));
+	const float2 F4 = H * (-Ky * Ny) + MulI(H * (-Kx * Ny));
+	OutA[Id.xy] = float4(F1, F2);
+	OutB[Id.xy] = float4(F3, F4);
+}
+
+#ifndef FFT_N
+#define FFT_N 128
+#endif
+#if FFT_N == 128
+#define FFT_LOG 7
+#else
+#define FFT_LOG 6
+#endif
+
+groupshared float4 SA[2][FFT_N];
+groupshared float4 SB[2][FFT_N];
+
+float4 Twist(float2 W, float4 V) { return float4(CMul(W, V.xy), CMul(W, V.zw)); }
+
+// One group per line; radix-2 Cooley-Tukey on bit-reversed input, e^{+i} twiddles (inverse transform).
+[numthreads(FFT_N, 1, 1)]
+void FFTCS(uint3 Gid : SV_GroupID, uint3 Tid : SV_GroupThreadID)
+{
+	const uint Line = Gid.x;
+	const uint T = Tid.x;
+	const uint Rev = reversebits(T) >> (32 - FFT_LOG);
+	const uint2 Src = Vertical ? uint2(Line, Rev) : uint2(Rev, Line);
+	SA[0][T] = SrcA[Src];
+	SB[0][T] = SrcB[Src];
+	uint Cur = 0;
+	[unroll]
+	for (uint Hs = 1; Hs < FFT_N; Hs <<= 1)
+	{
+		GroupMemoryBarrierWithGroupSync();
+		const uint Size = Hs * 2;
+		const uint Pos = T & (Size - 1);
+		const bool bTop = Pos < Hs;
+		const uint A = bTop ? T : T - Hs;
+		const uint B = A + Hs;
+		const uint Kk = bTop ? Pos : Pos - Hs;
+		const float Ang = OCEAN_TWO_PI * Kk / Size;
+		const float2 W = float2(cos(Ang), sin(Ang));
+		const float4 TA = Twist(W, SA[Cur][B]);
+		const float4 TB = Twist(W, SB[Cur][B]);
+		SA[1 - Cur][T] = bTop ? SA[Cur][A] + TA : SA[Cur][A] - TA;
+		SB[1 - Cur][T] = bTop ? SB[Cur][A] + TB : SB[Cur][A] - TB;
+		Cur = 1 - Cur;
+	}
+	GroupMemoryBarrierWithGroupSync();
+	const uint2 Dst = Vertical ? uint2(Line, T) : uint2(T, Line);
+	DstA[Dst] = SA[Cur][T];
+	DstB[Dst] = SB[Cur][T];
+}
+
+[numthreads(8, 8, 1)]
+void FinalizeCS(uint3 Id : SV_DispatchThreadID)
+{
+	if (Id.x >= N || Id.y >= N) return;
+	const float4 A = InA[Id.xy];   // (h, Dx, Dy, dh/dx)
+	const float4 B = InB[Id.xy];   // (dh/dy, dDx/dx, dDy/dy, dDx/dy)
+	const float L = Choppiness;
+	const float Dxx = L * B.y, Dyy = L * B.z, Dxy = L * B.w;
+	const float J = (1.0 + Dxx) * (1.0 + Dyy) - Dxy * Dxy;
+	float F = 0.0;
+	if (FoamOn != 0)
+	{
+		F = max(Foam[Id.xy] * exp(-Dt / max(FoamDecay, 0.01)), saturate((FoamThreshold - J) * FoamGain));
+	}
+	Foam[Id.xy] = F;
+	OutDisp[Id.xy] = float4(L * A.y, L * A.z, A.x, F);
+	OutDeriv[Id.xy] = float4(A.w, B.x, Dxx, Dyy);
+}
