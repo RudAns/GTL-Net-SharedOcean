@@ -1,6 +1,6 @@
-SOTEST PASS snapshots  5.8 kbit/s, 288 bits each
-SOTEST PASS clock_sync  rtt 37 ms (min 17), offset -18392386.025 s, jitter 8.6 ms
-SOTEST PASS local_clock_breaks  mean |draft delta vs server|: synced 10 cm, engine 3 cm, local 35 cm, sea time off by -14.5 s
-SOTEST PASS net_lag  rtt 240 ms with 200 ms emulated; clock error -0.0 ms
-SOTEST PASS reconstruct  mean |draft delta vs server|: interp 14 cm, rewind 3 cm, reconstruct 9 cm
-SOTEST PASS client_deck_walk  moved 583 cm relative to the ship
+SOTEST PASS snapshots  5.4 kbit/s, 280 bits each
+SOTEST PASS clock_sync  rtt 18 ms (min 16), offset -17202651.222 s, jitter 17.0 ms
+SOTEST PASS local_clock_breaks  mean |draft delta vs server|: synced 10 cm, engine 3 cm, local 35 cm, sea time off by -14.4 s
+SOTEST PASS net_lag  rtt 232 ms with 200 ms emulated; clock error -0.0 ms
+SOTEST PASS reconstruct  mean |draft delta vs server|: interp 14 cm, rewind 4 cm, reconstruct 9 cm
+SOTEST PASS client_deck_walk  moved 585 cm relative to the ship

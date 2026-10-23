@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>共享海面：UE5 落地要点</title><style>
+:root{--bg:#fbfaf7;--fg:#1f2328;--muted:#5d6670;--line:#e3e0d8;--accent:#17706b;--warn:#b9551f;--code:#f2efe8;--panel:#ffffff}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16181c;--fg:#e6e6e3;--muted:#9aa3ad;--line:#2d3138;--accent:#4fb2a8;--warn:#e48a54;--code:#20242a;--panel:#1d2025;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#16181c;--fg:#e6e6e3;--muted:#9aa3ad;--line:#2d3138;--accent:#4fb2a8;--warn:#e48a54;--code:#20242a;--panel:#1d2025;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.75 "Microsoft YaHei","PingFang SC","Noto Sans CJK SC",system-ui,sans-serif}
+.wrap{display:grid;grid-template-columns:220px minmax(0,1fr);gap:48px;max-width:1240px;margin:0 auto;padding:40px 24px 80px}
+nav{position:sticky;top:24px;align-self:start;font-size:14px}
+nav .t{font-weight:700;margin-bottom:8px;color:var(--muted);letter-spacing:.05em}
+nav ol{list-style:none;margin:0;padding:0;border-left:2px solid var(--line)}
+nav li a{display:block;padding:4px 12px;color:var(--muted);text-decoration:none}
+nav li a:hover{color:var(--accent)}
+main{min-width:0}
+main>p,main>ul,main>ol,main>h2,main>h3,header{max-width:46em}
+header h1{font-size:30px;line-height:1.3;margin:0 0 8px;text-wrap:balance}
+header .sub{color:var(--muted);margin:0 0 28px}
+h2{font-size:22px;margin:48px 0 12px;padding-top:8px;border-top:1px solid var(--line)}
+h3{font-size:18px;margin:28px 0 8px}
+p,li{margin:8px 0}
+code{font-family:"Cascadia Code",Consolas,monospace;font-size:.88em;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:14px 16px;border-radius:8px;overflow-x:auto;max-width:60em}
+pre code{background:none;padding:0;font-size:13.5px;line-height:1.6}
+table{border-collapse:collapse;margin:12px 0 20px;font-size:14.5px;display:block;overflow-x:auto;max-width:100%}
+th,td{border:1px solid var(--line);padding:6px 12px;text-align:left;vertical-align:top}
+th{background:var(--code)}
+td{font-variant-numeric:tabular-nums}
+.diagram{margin:20px 0 28px;max-width:62em}
+.diagram svg{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:8px;background:#fff}
+.diagram figcaption{font-size:13px;color:var(--muted);margin-top:6px}
+.note{border-left:3px solid var(--warn);background:var(--panel);padding:10px 14px;border-radius:0 8px 8px 0;max-width:46em;margin:14px 0}
+a{color:var(--accent)}
+@media (max-width:820px){.wrap{grid-template-columns:1fr;gap:16px;padding:24px 16px}nav{position:static}}
+</style></head>
+<body><div class="wrap">
+<nav><div class="t">目录</div><ol>
+<li><a href="#s1">1. 总览</a></li>
+<li><a href="#s2">2. 什么走网络</a></li>
+<li><a href="#s3">3. FFT 海面</a></li>
+<li><a href="#s4">4. 网络时钟</a></li>
+<li><a href="#s5">5. 高度查询</a></li>
+<li><a href="#s6">6. 船：服务器权威模拟</a></li>
+<li><a href="#s7">7. 快照序列化</a></li>
+<li><a href="#s8">8. 客户端呈现</a></li>
+<li><a href="#s9">9. 甲板与漂浮物</a></li>
+<li><a href="#s10">10. 海面渲染</a></li>
+<li><a href="#s11">11. 测量与自测</a></li>
+<li><a href="#s12">12. 坑点清单</a></li>
+<li><a href="#s13">13. 移植清单</a></li>
+</ol></nav>
+<main>
+<header>
+<h1>共享海面：UE5 落地要点</h1>
+<p class="sub">对应工程 GTL-Net-SharedOcean（UE 5.8，C++，不改引擎）。按数据流顺序列出《盗贼之海》式多人海面的每一步做法：确定性 FFT 海面、网络时钟、服务器权威的船、快照压缩与客户端呈现，附关键常数、坑点和移植清单，可以直接对照源码搬进自己的项目。原理、业界方案对比与推断依据见 <a href="Research.html">Research.html</a>。</p>
+</header>
+
+<h2 id="s1">1. 总览</h2>
+<p>核心思路只有一句：<strong>海面不同步，只同步算海面的输入。</strong>海面是“种子、海况参数、时间”的纯函数，每台机器各自计算；网络上只传海况（几十字节，变化时才发）和让各端时间对齐的时钟样本。船是服务器上的刚体，服务器读自己的海面算浮力，把结果作为快照发给客户端；客户端再决定怎样把这条船放到自己算出的海面上。</p>
+<figure class="diagram"><svg viewBox="0 0 980 360" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker></defs>
+<g font-size="13">
+<text x="150" y="24" text-anchor="middle" font-weight="700" fill="#555">服务器（监听服务器）</text>
+<text x="490" y="24" text-anchor="middle" font-weight="700" fill="#555">网络</text>
+<text x="830" y="24" text-anchor="middle" font-weight="700" fill="#555">每个客户端</text>
+<rect x="30" y="40" width="240" height="64" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="150" y="66" text-anchor="middle" font-weight="700" fill="#222">ASOGameState</text>
+<text x="150" y="88" text-anchor="middle" fill="#444">海况、种子、服务器开关</text>
+<rect x="30" y="128" width="240" height="64" rx="8" fill="#d7ebe8" stroke="#17706b"/>
+<text x="150" y="154" text-anchor="middle" font-weight="700" fill="#222">AOceanManager</text>
+<text x="150" y="176" text-anchor="middle" fill="#444">按服务器时间求玩法波段</text>
+<rect x="30" y="216" width="240" height="64" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="150" y="242" text-anchor="middle" font-weight="700" fill="#222">ASOShip::ServerStep</text>
+<text x="150" y="264" text-anchor="middle" fill="#444">60 Hz 固定步长，浮力 + 帆舵</text>
+<rect x="30" y="296" width="240" height="44" rx="8" fill="#eef0f2" stroke="#777"/>
+<text x="150" y="323" text-anchor="middle" fill="#222">ServerClockPing → 回复服务器时钟</text>
+<rect x="380" y="52" width="220" height="40" rx="6" fill="#fff" stroke="#999"/>
+<text x="490" y="77" text-anchor="middle" fill="#333">FSOSeaStateRep：变化时</text>
+<rect x="380" y="228" width="220" height="40" rx="6" fill="#fff" stroke="#999"/>
+<text x="490" y="253" text-anchor="middle" fill="#333">FSOShipState：约 280 bit × 30 Hz</text>
+<rect x="380" y="298" width="220" height="40" rx="6" fill="#fff" stroke="#999"/>
+<text x="490" y="323" text-anchor="middle" fill="#333">ping / pong：每秒 4 次</text>
+<rect x="710" y="40" width="240" height="64" rx="8" fill="#eef0f2" stroke="#777"/>
+<text x="830" y="66" text-anchor="middle" font-weight="700" fill="#222">USONetClock</text>
+<text x="830" y="88" text-anchor="middle" fill="#444">最短往返样本 + 限速修正</text>
+<rect x="710" y="128" width="240" height="64" rx="8" fill="#d7ebe8" stroke="#17706b"/>
+<text x="830" y="154" text-anchor="middle" font-weight="700" fill="#222">AOceanManager（同一份代码）</text>
+<text x="830" y="176" text-anchor="middle" fill="#444">按估计的服务器时间求全部波段</text>
+<rect x="710" y="216" width="240" height="64" rx="8" fill="#f6e2d4" stroke="#b9551f"/>
+<text x="830" y="242" text-anchor="middle" font-weight="700" fill="#222">快照缓冲 → 三种呈现</text>
+<text x="830" y="264" text-anchor="middle" fill="#444">插值 / 海面回退 / 竖直重建</text>
+<rect x="710" y="296" width="240" height="44" rx="8" fill="#eef0f2" stroke="#777"/>
+<text x="830" y="323" text-anchor="middle" fill="#222">clipmap 网格 + 海面材质</text>
+</g>
+<g stroke="#555" stroke-width="1.5" fill="none" marker-end="url(#a)">
+<path d="M270,72 L378,72"/><path d="M600,72 L708,150"/>
+<path d="M150,104 L150,126"/><path d="M150,192 L150,214"/>
+<path d="M270,248 L378,248"/><path d="M600,248 L708,248"/>
+<path d="M708,318 L602,318"/><path d="M378,318 L272,318"/>
+<path d="M830,104 L830,126"/><path d="M830,192 L830,214"/>
+</g>
+</svg><figcaption>橙色是需要权威的状态，绿色是各端独立计算、结果天然一致的海面，灰色是辅助。海面本身从不上网络。</figcaption></figure>
+<p>模块对应关系：<code>OceanFFT</code>（纯 C++ 的 FFT 级联，不依赖 UObject）、<code>OceanManager</code>（每台机器本地生成，不复制）、<code>SONetClock</code>（客户端控制器上的组件）、<code>SOShip</code>（复制的 Actor，自定义快照序列化）、<code>OceanSurface</code> + 材质（渲染）、<code>SharedOceanShaders</code> 模块（画面波段的 GPU 路径）。</p>
+
+<h2 id="s2">2. 什么走网络</h2>
+<table>
+<tr><th>数据</th><th>载体</th><th>频率</th><th>内容</th></tr>
+<tr><td>海况</td><td><code>ASOGameState::Sea</code>（<code>FSOSeaStateRep</code>）</td><td>变化时</td><td>当前与上一档海况、切换时刻（服务器时间）、涌浪倍率、风暴开关、种子</td></tr>
+<tr><td>服务器开关</td><td><code>ASOGameState::Settings</code></td><td>变化时</td><td>浮力模型、探针数、物理频率、快照频率、高度查询是否反解位移</td></tr>
+<tr><td>时钟</td><td><code>ServerClockPing</code> / <code>ClientClockPong</code>（Unreliable RPC）</td><td>锁定前每 0.05 s，之后每 0.25 s</td><td>客户端发送时刻、服务器时钟</td></tr>
+<tr><td>船</td><td><code>ASOShip::RepState</code>（<code>FSOShipState</code>）</td><td>30 Hz（可切 20 / 10）</td><td>位置、姿态、速度、角速度、舵、帆、服务器吃水、序号</td></tr>
+<tr><td>漂流宝箱</td><td><code>ASOChest::Drift</code></td><td>2 Hz</td><td>只有水平位置；起伏和倾斜在每台机器上按本地海面计算</td></tr>
+</table>
+<p>不走网络但各端仍一致的东西：整张海面、风暴中心（<code>StormCenterCm()</code> 是共享时间的函数，绕 900 m 半径的圆环每 512 s 一圈）、海况过渡的进度（由切换时刻和共享时间算出）。凡是能写成“共享时间的函数”的，都不需要同步。</p>
+
+<h2 id="s3">3. FFT 海面</h2>
+<h3>级联划分</h3>
+<table>
+<tr><th>级联</th><th>图块边长</th><th>分辨率</th><th>波长带</th><th>用途</th></tr>
+<tr><td>G0</td><td>768 m</td><td>64²</td><td>≥ 60 m，另含窄带涌浪</td><td>玩法波段：服务器与客户端都在 CPU 上算，物理查询只读 G0 + G1</td></tr>
+<tr><td>G1</td><td>192 m</td><td>128²</td><td>16–60 m</td><td>玩法波段</td></tr>
+<tr><td>V2</td><td>48 m</td><td>128²</td><td>3.2–16 m</td><td>画面波段：只在有画面的机器上算，默认走 GPU</td></tr>
+<tr><td>V3</td><td>11.7 m</td><td>64²</td><td>&lt; 3.2 m</td><td>画面波段</td></tr>
+<tr><td>S0 / S1</td><td>同 G0 / G1</td><td>同 G0 / G1</td><td>同 G0 / G1</td><td>风暴版本：与 G0 / G1 共用种子，只换风暴档的振幅表，按风暴权重混合</td></tr>
+</table>
+<p>每个级联只保留落在自己波长带里的波矢（<code>InBand</code>），带与带不重叠，所以叠加后不会重复计能量。图块边长取非整数比（768 / 192 / 48 / 11.7），避免各级的平铺周期对齐。分界选在 16 m：比船长（约 21 m）短得多的波对船体整体运动几乎没有影响，可以只留给画面。</p>
+<h3>频谱与振幅</h3>
+<pre><code>Phillips(k) = exp(-1/(k·L)²) / k⁴ · (k̂·ŵ)² · against · exp(-k²·0.05²) · Δk²
+             L = V²/g；逆风分量 against = 0.07；0.05 m 以下的毛细波被压掉
+Swell(k)    = exp(-((k - ks)/(0.12·ks))²) · max(k̂·d̂, 0)²⁴      // 窄带长涌浪，美术可调
+振幅定标：把 G0..V3 四个级联的 Phillips 总和 Σ 定标到目标有效波高
+             VarianceScale = (Hs/4)² / Σ
+每个模态：  Amp = sqrt(Var · 0.25)   // h̃ 同时用 h0(k) 和 conj(h0(-k))，每个抽样只分到一半方差</code></pre>
+<table>
+<tr><th>海况</th><th>风速</th><th>有效波高 Hs</th><th>涌浪振幅 / 波长</th><th>choppiness λ</th></tr>
+<tr><td>平静</td><td>6 m/s</td><td>0.7 m</td><td>0.6 m / 90 m</td><td>0.9</td></tr>
+<tr><td>普通</td><td>11 m/s</td><td>2.0 m</td><td>1.8 m / 110 m</td><td>1.15</td></tr>
+<tr><td>风暴</td><td>18 m/s</td><td>4.8 m</td><td>5.0 m / 135 m</td><td>1.3</td></tr>
+</table>
+<p>三档的振幅表在开局和涌浪倍率变化时一次算好（<code>RebuildTables</code>），每帧只按过渡进度在两张表之间插值。过渡进度 = <code>smoothstep((共享时间 − ChangeTime) / 8 s)</code>，因为 ChangeTime 是复制下来的服务器时间，所有机器在同一时刻走到同一个混合比例。“夸张巨浪”主要靠涌浪项：它是一个独立的美术参数，不受 Phillips 谱高度的物理约束，演示里用 <code>,</code> <code>.</code> 调倍率。</p>
+<h3>确定性的三个条件</h3>
+<ol>
+<li><strong>随机数固定</strong>：每个级联的高斯抽样表 <code>Xi</code> 在初始化时用 <code>FRandomStream((Seed·31 + 级联种子) · 2654435761)</code> 按固定顺序生成一次，之后只读。种子随海况复制。</li>
+<li><strong>色散量化</strong>：<code>ω = max(1, floor(√(g|k|) / ω₀)) · ω₀</code>，<code>ω₀ = 2π / 512 s</code>。每个分量的周期都整除 512 s，整片海每 512 s 精确重复，时间可以取模，float 精度问题不会随运行时长累积。</li>
+<li><strong>相位用 double</strong>：<code>Ph = fmod(ω · T, 2π)</code> 在 double 下计算后再转 float 求 cos / sin。T 是取模后的海浪时间（0–512 s）。</li>
+</ol>
+<p>做到这三点后，海面在各端的差异只来自时间误差和浮点运算顺序（ParallelFor 的分块不影响结果，因为每个元素的计算互相独立）。</p>
+<h3>一次求值：四个复数 FFT 输出八个实数场</h3>
+<pre><code>H  = h0(k)·e^{iωt} + conj(h0(-k))·e^{-iωt}
+F1 = H + i·Dx          → 逆 FFT 后 实部 = 高度 h，     虚部 = 水平位移 Dx
+F2 = Dy + i·(i·kx·H)   →           实部 = Dy，         虚部 = ∂h/∂x
+F3 = i·ky·H + i·(−kx·nx·H)  →      实部 = ∂h/∂y，      虚部 = ∂Dx/∂x
+F4 = −ky·ny·H + i·(−kx·ny·H) →     实部 = ∂Dy/∂y，     虚部 = ∂Dx/∂y
+J  = (1 + λ·Dxx)(1 + λ·Dyy) − (λ·Dxy)²    // 雅可比，&lt; 阈值处生成泡沫</code></pre>
+<p>利用“实数场的频谱共轭对称”，把两个实数场装进一个复数 FFT 的实部和虚部，四次逆 FFT 得到高度、两向位移、两向斜率和雅可比所需的三个导数。服务器（没有画面）只需要 F1、F2（<code>bFull = false</code>），客户端的玩法波段和画面波段都算全套。泡沫是时间积分量（阈值 0.72、增益 3、衰减 2.6 s，V3 为 0.8 s），只用于画面，不属于共享状态。</p>
+<div class="note">注意：泡沫、法线这类纯画面量可以各端不同；任何会影响判定的量（高度、位移）都必须只来自“种子、参数、时间”。在海面上加任何带状态的东西之前，先确认它不进玩法波段。</div>
+
+<h2 id="s4">4. 网络时钟</h2>
+<p>海面一致的前提是各端的“现在”一致。<code>USONetClock</code> 是一个简化的 NTP：</p>
+<pre><code>客户端：ServerClockPing(t1 = FPlatformTime::Seconds())
+服务器：ClientClockPong(t1, Ts = 服务器 World 时间)
+客户端收到时 now：
+    RTT    = now − t1                       // ≤ 0.5 ms 的样本丢弃
+    Offset = Ts + RTT/2 − now
+    窗口保留最近 24 个样本，取 RTT 最小的那个作为 TargetOffset
+每帧：
+    |Target − Smoothed| &gt; 1 s → 直接跳到 Target（首次锁定或长时间卡顿）
+    否则 Smoothed 向 Target 移动，每秒最多 0.05 s（即海浪快慢最多变化 5%）
+服务器时间估计 = now + Smoothed</code></pre>
+<ul>
+<li><strong>为什么取最短往返的样本</strong>：RTT/2 假设上下行延迟相等，往返越短，不对称的余地越小。抖动大的网络里，平均值会被排队延迟拉偏，最小值不会。</li>
+<li><strong>为什么限速修正</strong>：时间一跳，整片海就会瞬移；限速后海浪只是略快或略慢，肉眼看不出。时间也永远不会倒退。</li>
+<li><strong>用实时时钟测往返</strong>：<code>FPlatformTime::Seconds()</code> 单调且不按帧量化。用 World 时间测 RTT 会被帧时间量化，60 fps 下误差就是十几毫秒。</li>
+</ul>
+<p>演示用 F3 在三种来源之间切换对照：网络时钟、引擎默认的 <code>GetServerWorldTimeSeconds()</code>、客户端自己的 World 时间。自测在模拟 200 ms 延迟时，网络时钟的误差仍在 0.1 ms 以内；本地时钟会让两端的海浪错开十几秒（客户端进入地图的时间差），吃水偏差从约 10 cm 变成约 35 cm。</p>
+
+<h2 id="s5">5. 高度查询</h2>
+<p>FFT 海面带水平位移：网格点 <code>x₀</code> 被移到 <code>x₀ + D(x₀)</code>。要问“世界坐标 P 处的水面多高”，需要先反解 P 是从哪个静止点移过来的：</p>
+<pre><code>rest = P
+重复 N 次： rest = P − D_xy(rest)     // 不动点迭代，λ &lt; 1.3 时几次就收敛
+height(P) = D_z(rest)</code></pre>
+<p>船的浮力用 4 次迭代，吃水统计和宝箱用 3 次，法线（±1.5 m 中心差分）用 2 次。<code>D</code> 是 G0 + G1 在 CPU 上的双线性、环绕采样，风暴区内按 <code>StormWeight</code> 与 S0 + S1 混合。服务器开关里的“高度查询”可以改成 0 次迭代（直接取 <code>D_z(P)</code>），浪越陡、λ 越大，船和浪的错位越明显，这是常见的“船浮在浪的侧面”问题的来源。</p>
+
+<h2 id="s6">6. 船：服务器权威模拟</h2>
+<h3>固定步长</h3>
+<p>服务器每帧把真实时间累加进 <code>Accumulator</code>，按物理频率（默认 60 Hz，可切 30 / 10）走整数步，单帧最多 12 步；渲染位置在上一步和当前步之间按余量插值。快照的 <code>ServerTime</code> 是物理步的时间戳，不是帧时间，客户端据此插值。</p>
+<h3>浮力：探针受力（默认）</h3>
+<pre><code>N 个探针，位于原点下方 1.5 m（静止吃水 RestDraft = 1.5 m）
+K = g / (N · RestDraft)                      // 质量归一化的刚度：静止时总浮力正好等于重力
+C = 2 · 0.55 · sqrt(g / RestDraft) / N       // 阻尼比 0.55
+每个探针：depth = height(Pxy) − Pz
+          Fz = max(K · min(depth, 2.6) − C · vz, −0.3K)   // depth ≤ 0 时不受力
+          力矩的作用点取探针的 (x, y)，高度改为原点上方 0.6 m（稳心）
+角加速度 = 力矩 / 归一化惯量 (4, 35, 38) m²（横摇、纵摇、偏航）
+另加压载扶正 1.6 · (up × Z) 和横纵摇阻尼 0.45</code></pre>
+<div class="note">坑：如果力矩按探针真实位置（水线以下）计算，船体倾斜时浮力作用点在重心下方，等于一个倒立摆，单探针或双探针时会直接倾覆。把作用点抬到稳心高度后，倾斜时浮力产生的是扶正力矩。</div>
+<h3>浮力：平面拟合 + 弹簧（《Atlas》式）</h3>
+<p>在船的偏航坐标系下取 N（至少 4）个点的水面高度，用最小二乘拟合平面 <code>z = a·x + b·y + c</code>（3×3 正规方程，克莱姆法则求解），以平面推出目标高度与目标法线，再用弹簧追随：竖直刚度 6.5、阻尼 2·0.6·2.55，角刚度 6.0、角阻尼 3.2。它在低物理频率（10 Hz）下比探针稳定得多，代价是丢掉了局部浪形的细节（船头扎进浪里这类表现）。</p>
+<h3>帆、舵与阻力</h3>
+<p>阻力在船体坐标系下分轴计算（纵向小、横向大），乘以湿探针比例；帆力沿船头方向，效率 = 0.15 + 0.85 × 顺风程度；舵产生的偏航角加速度与纵向速度成正比。这些参数只为手感服务，换成自己的航行模型时整段替换即可，网络部分不受影响。</p>
+
+<h2 id="s7">7. 快照序列化</h2>
+<p><code>FSOShipState</code> 用 <code>WithNetSerializer</code> 自定义序列化，<code>WithIdentical</code> 按序号比较，状态没变就不重发。实测每个快照 280–296 bit，30 Hz 时约 5.4–5.8 kbit/s。</p>
+<table>
+<tr><th>字段</th><th>编码</th><th>位数</th><th>精度</th></tr>
+<tr><td>ServerTime</td><td>double</td><td>64</td><td>—</td></tr>
+<tr><td>位置</td><td>整数厘米，zigzag 后 <code>SerializeIntPacked</code></td><td>每轴 8–40</td><td>1 cm</td></tr>
+<tr><td>姿态</td><td>smallest-three：最大分量的序号 2 bit，其余三个分量映射到 [−1/√2, 1/√2] 各 10 bit</td><td>32</td><td>约 0.1°</td></tr>
+<tr><td>线速度</td><td>int16，cm/s</td><td>48</td><td>1 cm/s</td></tr>
+<tr><td>角速度</td><td>int16，mrad/s</td><td>48</td><td>0.001 rad/s</td></tr>
+<tr><td>舵 / 帆</td><td>int8 / uint8</td><td>16</td><td>1/127、1/255</td></tr>
+<tr><td>服务器吃水</td><td>int8，4 cm 一档</td><td>8</td><td>4 cm（只供对照仪表）</td></tr>
+<tr><td>序号</td><td>packed uint32</td><td>8–40</td><td>—</td></tr>
+</table>
+<p>进一步压缩的方向：ServerTime 改为相对上一快照的步数（省约 50 bit），位置改为相对上一确认快照的增量。演示保留绝对值，便于在仪表上逐字段对照。复制设置：<code>bAlwaysRelevant</code>、<code>NetPriority = 3</code>、<code>NetUpdateFrequency = 30</code>（最低 10），关闭 <code>ReplicateMovement</code>，避免引擎再发一份移动数据。</p>
+
+<h2 id="s8">8. 客户端呈现</h2>
+<figure class="diagram"><svg viewBox="0 0 980 230" xmlns="http://www.w3.org/2000/svg" font-family="Microsoft YaHei, sans-serif">
+<defs><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker></defs>
+<g font-size="13">
+<line x1="40" y1="110" x2="940" y2="110" stroke="#777" stroke-width="1.5" marker-end="url(#b)"/>
+<text x="944" y="132" text-anchor="end" fill="#555">服务器时间</text>
+<g fill="#b9551f"><circle cx="160" cy="110" r="6"/><circle cx="270" cy="110" r="6"/><circle cx="380" cy="110" r="6"/><circle cx="490" cy="110" r="6"/><circle cx="600" cy="110" r="6"/><circle cx="710" cy="110" r="6"/></g>
+<text x="435" y="92" text-anchor="middle" fill="#b9551f">已到达的快照（每 33 ms 一个，缓冲保留 3 s）</text>
+<line x1="545" y1="60" x2="545" y2="170" stroke="#17706b" stroke-width="2"/>
+<text x="545" y="190" text-anchor="middle" font-weight="700" fill="#17706b">渲染时刻 = 估计的服务器时间 − 插值延迟</text>
+<line x1="840" y1="60" x2="840" y2="170" stroke="#333" stroke-width="2" stroke-dasharray="5 4"/>
+<text x="840" y="52" text-anchor="middle" font-weight="700" fill="#333">估计的服务器时间（网络时钟）</text>
+<path d="M548,150 L836,150" stroke="#555" stroke-width="1.2" marker-end="url(#b)" fill="none"/>
+<text x="692" y="170" text-anchor="middle" fill="#555">插值延迟，默认 100 ms</text>
+<rect x="490" y="122" width="110" height="10" fill="#d7ebe8" stroke="#17706b"/>
+<text x="545" y="216" text-anchor="middle" fill="#444">在相邻两个快照之间做 Hermite 插值；越过最新快照最多外推 0.2 s，然后停住</text>
+</g>
+</svg><figcaption>插值延迟要大于“快照间隔 + 网络抖动”，否则缓冲会被追空。演示里用 <code>-</code> <code>=</code> 调整，F8 的快照幽灵把最新快照画成线框，和插值位置对比。</figcaption></figure>
+<p>位置用两端快照的速度做三次 Hermite 插值（比线性插值少了每 33 ms 一次的折角），姿态用 Slerp。难点在于：插值出来的船处在 100 ms 之前，而本地海面算的是“现在”，两者对不上时船会在浪里上下错位。演示提供三种呈现方式（F4）：</p>
+<table>
+<tr><th>方式</th><th>做法</th><th>两端吃水差（自测）</th><th>代价</th></tr>
+<tr><td>整体快照插值</td><td>整个姿态来自快照，海面画“现在”</td><td>约 14 cm</td><td>浪越快、延迟越大，错位越明显</td></tr>
+<tr><td>海面同步回退</td><td>整个姿态来自快照，本机海面也按同样的延迟时间计算和绘制（<code>SetPresentationDelay</code>）</td><td>约 3–4 cm</td><td>本机所有东西都看到 100 ms 前的海，和本地预测的物体（自己发射的炮弹）会有时间差</td></tr>
+<tr><td>水平插值 + 竖直重建</td><td>x、y、偏航来自快照；升沉、纵摇、横摇由本机按本地海面跑一个只算竖直方向的浮力模拟（每帧最多 4 个 60 Hz 子步），高度以每秒 35% 的速度向快照收敛，偏差超过 3 m 直接对齐</td><td>约 9 cm</td><td>升沉和摇摆不再与服务器逐帧一致，只在统计上一致；判定仍以服务器为准</td></tr>
+</table>
+<p>选择建议：船上有玩家、需要“船贴着浪走”的观感时用竖直重建；需要和服务器姿态精确一致的场合（录像回放、观战）用海面回退；整体插值只适合远处的船。三者共用同一份快照，可以按距离混用。</p>
+
+<h2 id="s9">9. 甲板与漂浮物</h2>
+<ul>
+<li><strong>甲板上的角色</strong>：船的根组件就是甲板碰撞盒（<code>BlockAll</code>、可移动）。角色用 CharacterMovement 的基座移动（movement base），<code>bIgnoreBaseRotation = false</code>，船每帧在 <code>TG_PrePhysics</code> 里摆好姿态，角色随基座一起移动和旋转。引擎的基座移动复制会把角色位置换算成相对基座的坐标发送，所以客户端上船怎么呈现，甲板上的人就跟到哪里。舷墙是几个额外的碰撞盒。</li>
+<li><strong>掌舵</strong>：客户端只发输入（<code>ServerHelmInput</code>，舵角和升降帆增量，Unreliable），服务器写入船的控制量，再随快照复制回来驱动舵轮和帆的外观。</li>
+<li><strong>漂浮物</strong>：宝箱只复制水平位置（2 Hz），高度和倾斜在每台机器上用本地海面的 <code>HeightCm</code> 与 <code>NormalAt</code> 计算。这类不影响判定的小物件完全不需要物理同步，带宽可以忽略。</li>
+</ul>
+
+<h2 id="s10">10. 海面渲染</h2>
+<h3>以相机为中心的几何 clipmap</h3>
+<p>9 层，每层 128 × 128 格，第 0 层格宽 50 cm，每层翻倍（第 8 层 128 m）。每层中心按“两倍格宽”吸附到相机位置，保证顶点落在下一层的格点上。第 1 层起挖掉中心 <code>(128/4 − 1)</code> 格的方洞，洞比内层小两格，重叠部分在材质里按内层矩形 <code>InnerRect</code> 丢弃。最外面是一圈平面裙边，一直延伸到 60 km。网格加了两个不引用的顶点（±30 m）撑大包围盒，避免位移后的浪被视锥剔除。</p>
+<h3>材质</h3>
+<pre><code>// 顶点着色（WPO）：外圈 16 格内逐步把奇数格点并到偶数格点上，与外层无缝衔接
+m    = saturate((dinf − (hc − 16)) / 14)
+rest = (OBJ.xy + (g − odd·m)·CellSize) · 0.01        // 静止位置，米
+w    = saturate(2 − 4·s / λmin)                       // 格宽 s 超过最短波长的 1/4 时淡出该级联
+d    = lerp(G0+G1, S0+S1, 风暴权重) + V2 + V3          // 各自乘 w
+// 像素着色：同样按静止位置采样斜率与位移，s 换成像素覆盖范围</code></pre>
+<p>按格宽淡出级联是抗混叠的关键：远处网格稀疏，如果仍叠加 3 m 的小浪，顶点采样会产生闪烁。颜色在深水色与次表面色之间按浪峰遮罩插值（Rare 在 SIGGRAPH 2018 公开的做法），泡沫取各级雅可比泡沫的最大值，再与合成的压缩量阈值合并，并用最细一级的高度打散成块状。</p>
+<h3>画面波段的 GPU 路径</h3>
+<p>V2、V3 默认在 GPU 上计算，三个 RDG 计算通道写入和 CPU 路径完全相同格式的纹理，可以在实验台随时切换对照：</p>
+<ol>
+<li><strong>Spectrum</strong>（8×8 线程组）：读 <code>H0</code> 纹理（<code>h0(k)</code> 与 <code>conj(h0(−k))</code> 打包成一个 float4），推进相位，写出 F1–F4 两张 RGBA32F。</li>
+<li><strong>逆 FFT</strong>：每条线一个线程组（64 或 128 线程，排列组合编译两份），在组共享内存里做基 2 蝶形，先行后列。</li>
+<li><strong>Finalize</strong>：算雅可比、累积泡沫，写位移和导数纹理。</li>
+</ol>
+<div class="note">坑：在 UAV 上原地读写 RGBA32F（typed UAV load）不是所有平台都支持，D3D11 级别的硬件会编译失败。改为两组纹理来回交换：行变换 A、B → C、D，列变换 C、D → A、B，每一遍只读 SRV、只写 UAV。</div>
+<p>着色器模块 <code>SharedOceanShaders</code> 的加载阶段必须是 <code>PostConfigInit</code>，并在 <code>StartupModule</code> 里用 <code>AddShaderSourceDirectoryMapping("/SharedOcean", 工程/Shaders)</code> 注册虚拟路径，否则全局着色器不会被编译。H0 只在振幅表变化（海况过渡中、涌浪倍率改变）时重新上传。</p>
+
+<h2 id="s11">11. 测量与自测</h2>
+<p>RTX 3060 级显卡上，1600 × 900 窗口约 9 ms 一帧；海面 CPU 耗时约 1.4 ms（画面波段在 GPU 上），全部走 CPU 时约 2.3 ms。服务器只算玩法波段（G0、G1，以及风暴开启时的 S0、S1），不需要显卡。</p>
+<p><code>powershell -File Tools/iterate.ps1 -Net</code> 编译后离屏运行两组自测，全部通过注入的键鼠事件完成：</p>
+<ul>
+<li>主机 12 项：甲板行走、鼠标环视、掌舵、航速、转向、风暴有效波高、平面拟合稳定、10 Hz 物理、单探针不倾覆、GPU 画面波段、离舵、帧时间。</li>
+<li>主机 + 客户端 6 项：快照带宽与位数、时钟同步、三种时钟来源下的两端吃水差、模拟 200 ms 延迟下的时钟误差、三种呈现方式下的吃水差、客户端在航行的船上行走。</li>
+</ul>
+<p>“两端吃水差”是这套系统最有用的单一指标：客户端用本地海面算出的船体平均吃水，减去服务器在同一服务器时刻的吃水（随快照下发）。它同时反映时钟误差、海面实现差异和呈现方式的好坏，接近 0 表示两端看到船以同样的方式坐在海上。</p>
+
+<h2 id="s12">12. 坑点清单</h2>
+<ul>
+<li><strong>海面里混进状态</strong>：任何积分量（泡沫、波浪的“记忆”、交互涟漪）一旦进了物理查询，各端就会发散。玩法波段只能是纯函数。</li>
+<li><strong>时间用 float</strong>：float 秒在运行几小时后只剩毫秒级精度，相位会抖。用量化色散让海面有限周期循环，相位在 double 下算。</li>
+<li><strong>用 World 时间测往返</strong>：被帧时间量化，误差是半帧到一帧。测量用 <code>FPlatformTime</code>，海面求值用估计的服务器时间。</li>
+<li><strong>高度查询不反解位移</strong>：λ 较大时直接读 <code>D_z(P)</code> 会让船浮在浪的侧面，误差可达半米以上。</li>
+<li><strong>浮力力矩作用在探针处</strong>：少探针时等于倒立摆，船会翻。作用点抬到稳心。</li>
+<li><strong>同时复制移动</strong>：自定义快照的船必须关闭 <code>ReplicateMovement</code>，否则引擎的移动复制会和自己的插值互相覆盖。</li>
+<li><strong>插值延迟太小</strong>：小于“快照间隔 + 抖动”时缓冲被追空，船会周期性停顿。外推只做 0.2 s，超时宁可停住也不要瞬移。</li>
+<li><strong>GPU FFT 原地读写 UAV</strong>：typed UAV load 在部分硬件上不支持，用 SRV / UAV 交换。</li>
+<li><strong>同一台机器双开</strong>：监听服务器默认占用 7777 端口，已开着的主机会让第二个主机自动换到 7778，客户端就可能连到旧主机；连接失败时客户端会退回单机地图，看起来像“第二个主机”。双开脚本应使用专用端口，并在客户端检测“没有成为客户端”时提示并重试。<code>-WinX</code> / <code>-WinY</code> 在这里不生效，两个窗口会叠在屏幕中央，需要在运行时用 <code>SWindow::ReshapeWindow</code> 摆放。</li>
+<li><strong>F1–F12 被引擎占用</strong>：开发版的调试执行绑定会把 F1–F5 映射成视图模式，在 <code>DefaultInput.ini</code> 里写 <code>!DebugExecBindings=ClearArray</code>。</li>
+</ul>
+
+<h2 id="s13">13. 移植清单</h2>
+<ol>
+<li>拷贝 <code>OceanFFT.h/.cpp</code>（纯 C++），按自己的船长和视距调整级联表：玩法波段的下限取船长的 0.5–0.8 倍。</li>
+<li>拷贝 <code>OceanManager</code>：每台机器本地生成一个，海况结构体放进 GameState 复制，时间来源接自己的网络时钟。</li>
+<li>拷贝 <code>SONetClock</code>（或在已有的时钟同步里加上“最短往返样本 + 限速修正”），所有共享表现（海面、风暴、天气循环）都读它。</li>
+<li>船：服务器固定步长模拟 + 自定义快照（<code>WithNetSerializer</code>、<code>WithIdentical</code>），客户端缓冲插值。先用整体插值跑通，再加竖直重建。</li>
+<li>甲板角色直接用 CharacterMovement 的基座移动，不需要额外的网络代码。</li>
+<li>渲染：已有海面材质的项目只需把位移来源换成这几张级联纹理并按静止位置采样；没有的可以拷贝 <code>OceanSurface</code> 与 <code>Tools/build_assets.py</code> 里的材质 HLSL。</li>
+<li>用“两端吃水差”做回归测试：改了时钟、海面或呈现方式之后，跑一遍 <code>-Net</code> 自测看它有没有变大。</li>
+</ol>
+</main></div></body></html>

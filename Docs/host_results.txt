@@ -1,4 +1,5 @@
-SOTEST PASS deck_walk  moved 633 cm on deck, based=1
+SOTEST PASS deck_walk  moved 631 cm on deck, based=1
+SOTEST PASS mouse_look  view turned 6.2 deg from injected mouse motion
 SOTEST PASS take_helm  
 SOTEST PASS sailing  11.7 kn, sail 1.00
 SOTEST PASS steering  turned 25 deg
@@ -6,6 +7,6 @@ SOTEST PASS storm_state  Hs 4.80 m
 SOTEST PASS planefit_stable  pitch -1.7 roll 2.0
 SOTEST PASS physics_10hz  
 SOTEST PASS probe_count  1 probes
-SOTEST PASS visual_band_gpu  ocean CPU time 1.74 ms with the visual band on the GPU, 1.82 ms on the CPU
+SOTEST PASS visual_band_gpu  ocean CPU time 1.40 ms with the visual band on the GPU, 2.33 ms on the CPU
 SOTEST PASS leave_helm  
-SOTEST PASS frame_time  8.1 ms/frame, ocean CPU 1.60 ms
+SOTEST PASS frame_time  9.0 ms/frame, ocean CPU 1.99 ms
