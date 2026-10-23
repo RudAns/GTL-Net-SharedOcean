@@ -115,3 +115,10 @@ powershell -File Tools/iterate.ps1 [-Assets] [-NoBuild] [-NoHost] [-Net]
 
 - 角色：UE5 第三人称模板自带的 Mannequin（`Content/Characters/Mannequins`），正常比例。
 - 船、岛、码头、灯塔、宝箱：全部在 C++ 中程序化生成（`SOMeshBuilder`），顶点色着色。
+
+## 许可证
+
+本仓库自己编写的代码、脚本、着色器、文档和截图以 [MIT 许可证](LICENSE) 发布。下列第三方内容不在 MIT 范围内，仍按各自的许可使用：
+
+- 角色 Mannequin（`Content/Characters/Mannequins`）：Epic Games 随引擎模板提供的示例内容（EULA 中的 Examples），按 Unreal Engine EULA 可随项目再分发，版权归 Epic Games 所有。
+- Unreal Engine 5.8：打开、编译和运行本工程需遵守 [Unreal Engine EULA](https://www.unrealengine.com/eula/unreal)。
