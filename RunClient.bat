@@ -1,5 +1,5 @@
 @echo off
-rem Join a host on this machine (or pass an address: RunClient.bat <host-ip>).
+rem Join a host on this machine (or pass the host machine's address: RunClient.bat <address>).
 rem The engine is found automatically (see Tools\find_ue.ps1); set UE_ROOT to override.
 for /f "usebackq delims=" %%P in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Tools\find_ue.ps1"`) do set UE_ROOT=%%P
 if "%UE_ROOT%"=="" (
