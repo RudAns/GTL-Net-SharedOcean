@@ -402,7 +402,10 @@ void USOHud::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 
 	// crew card
 	const USONetClock* C = P->GetNetClock();
-	RoleText->SetText(T(P->IsHost() ? TEXT("主机（权威服务器）") : FString::Printf(TEXT("客户端 · 往返 %.0f ms"), C->LastRttMs)));
+	const ENetMode Mode = P->GetNetMode();
+	RoleText->SetText(T(Mode == NM_Client ? FString::Printf(TEXT("客户端 · 往返 %.0f ms"), C->LastRttMs)
+		: (Mode == NM_ListenServer ? FString::Printf(TEXT("主机（监听服务器）· %d 名客户端"), P->GetWorld()->GetNumPlayerControllers() - 1)
+		: FString(TEXT("单机（未联机）")))));
 	if (O && GS)
 		SeaText->SetText(T(FString::Printf(TEXT("海况 %s · 涌浪 × %.2f%s"), *AOceanManager::SeaStateName((ESOSeaState)GS->Sea.Current).ToString(), GS->Sea.SwellScale, O->GetStateBlend() < 0.99f ? TEXT(" · 过渡中") : TEXT(""))));
 	TreasureText->SetText(T(FString::Printf(TEXT("宝箱 %d"), GS ? GS->Treasure : 0)));

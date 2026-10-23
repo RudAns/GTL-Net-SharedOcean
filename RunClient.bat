@@ -9,4 +9,4 @@ if "%UE_ROOT%"=="" (
 )
 set HOST=%1
 if "%HOST%"=="" set HOST=127.0.0.1
-start "" "%UE_ROOT%\Engine\Binaries\Win64\UnrealEditor.exe" "%~dp0SharedOcean.uproject" %HOST% -game -windowed -ResX=1600 -ResY=900
+start "" "%UE_ROOT%\Engine\Binaries\Win64\UnrealEditor.exe" "%~dp0SharedOcean.uproject" %HOST% -SOJoin=%HOST% -game -windowed -ResX=1600 -ResY=900

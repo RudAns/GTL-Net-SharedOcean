@@ -1,6 +1,8 @@
 #include "SOPlayerController.h"
 
 #include "DrawDebugHelpers.h"
+#include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Framework/Application/SlateApplication.h"
@@ -36,6 +38,22 @@ void ASOPlayerController::BeginPlay()
 	Hud = CreateWidget<USOHud>(this, USOHud::StaticClass());
 	if (Hud) Hud->AddToViewport();
 	SetInputMode(FInputModeGameOnly());
+	// Window title and -SOSide=L|R placement (Run2P puts host and client side by side). The engine centres every
+	// new window (-WinX is not honoured here) and names it only when first shown, which for the host happens after
+	// BeginPlay, so do both a moment later.
+	FParse::Value(FCommandLine::Get(), TEXT("-SOSide="), WindowSide);
+	{
+		FTimerHandle Handle;
+		GetWorldTimerManager().SetTimer(Handle, this, &ASOPlayerController::PlaceWindow, 0.5f, false);
+	}
+	// Started to join a host but the connection failed (host not up yet, or it closed): the engine falls back to a
+	// local copy of the map. Say so on screen and keep retrying instead of silently looking like a second host.
+	if (FParse::Value(FCommandLine::Get(), TEXT("-SOJoin="), JoinAddress) && GetNetMode() != NM_Client)
+	{
+		bIntroOpen = false;
+		Toast(TEXT("正在连接主机"), FString::Printf(TEXT("还没有连上 %s。请确认主机窗口已经打开，每 3 秒自动重试一次。"), *JoinAddress));
+		GetWorldTimerManager().SetTimer(JoinTimer, this, &ASOPlayerController::RetryJoin, 3.f, true, 3.f);
+	}
 	FParse::Value(FCommandLine::Get(), TEXT("-SOCapture="), CaptureDir);
 	FParse::Value(FCommandLine::Get(), TEXT("-SOCaptureRole="), CaptureRole);
 	if (!CaptureDir.IsEmpty())
@@ -79,6 +97,35 @@ ASOShip* ASOPlayerController::GetNearbyHelmShip() const
 	for (TActorIterator<ASOShip> It(GetWorld()); It; ++It)
 		if (FVector::Dist(It->GetHelmLocation(), S->GetActorLocation()) < 320.f) return *It;
 	return nullptr;
+}
+
+void ASOPlayerController::PlaceWindow()
+{
+	if (!FSlateApplication::IsInitialized() || !GEngine || !GEngine->GameViewport) return;
+	TSharedPtr<SWindow> Window = GEngine->GameViewport->GetWindow();
+	if (!Window.IsValid() || !Window->GetNativeWindow().IsValid()) return;
+	// name the role in the title bar so two windows on one screen are never mistaken for each other
+	const ENetMode Mode = GetNetMode();
+	Window->SetTitle(FText::FromString(Mode == NM_Client ? TEXT("共享之海 · 客户端")
+		: (Mode == NM_ListenServer ? TEXT("共享之海 · 主机") : TEXT("共享之海 · 单机（未联机）"))));
+	if (WindowSide.IsEmpty()) return;
+	FDisplayMetrics Display;
+	FSlateApplication::Get().GetInitialDisplayMetrics(Display);
+	const FPlatformRect& WA = Display.PrimaryDisplayWorkAreaRect;
+	const float W = (WA.Right - WA.Left) * 0.5f;
+	const float H = FMath::Min<float>(WA.Bottom - WA.Top, W * 0.66f);
+	// ReshapeWindow takes the client area, so leave room for the frame and title bar
+	const float Border = Window->GetNativeWindow()->GetWindowBorderSize();
+	const float Title = Window->GetNativeWindow()->GetWindowTitleBarSize();
+	const float X = WA.Left + (WindowSide.StartsWith(TEXT("R")) ? W : 0.f);
+	Window->ReshapeWindow(FVector2D(X + Border, WA.Top + Title + Border), FVector2D(W - 2.f * Border, H - Title - 2.f * Border));
+}
+
+void ASOPlayerController::RetryJoin()
+{
+	if (GetNetMode() == NM_Client) { GetWorldTimerManager().ClearTimer(JoinTimer); return; }
+	Toast(TEXT("正在连接主机"), FString::Printf(TEXT("还没有连上 %s，正在重试。"), *JoinAddress));
+	ConsoleCommand(FString::Printf(TEXT("open %s"), *JoinAddress));
 }
 
 void ASOPlayerController::StartGame()

@@ -90,6 +90,11 @@ private:
 	// self-test
 	FString CaptureDir;
 	FString CaptureRole;
+	FString JoinAddress;		// -SOJoin=<addr>: keep trying to reach the host while we are not a client
+	FTimerHandle JoinTimer;
+	void RetryJoin();
+	FString WindowSide;			// -SOSide=L|R: left or right half of the primary monitor (Run2P)
+	void PlaceWindow();				// role in the title bar, and side-by-side placement
 	double CaptureT = 0.0;
 	int32 CaptureStep = 0;
 	double StepStart = 0.0;
