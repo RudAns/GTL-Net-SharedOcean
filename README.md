@@ -12,7 +12,7 @@
 <img alt="联机 支持" src="https://img.shields.io/badge/%E8%81%94%E6%9C%BA-%E6%94%AF%E6%8C%81-8a2be2">
 <img alt="手游 可降级" src="https://img.shields.io/badge/%E6%89%8B%E6%B8%B8-%E5%8F%AF%E9%99%8D%E7%BA%A7-2ea44f">
 
-[📥 下载调研报告](Docs/Research.html) · [📥 下载落地文档](Docs/Implementation.html)
+[📥 下载调研报告](https://github.com/RudAns/GTL-Net-SharedOcean/releases/latest/download/Research.html) · [📥 下载落地文档](https://github.com/RudAns/GTL-Net-SharedOcean/releases/latest/download/Implementation.html)
 
 <br>
 
