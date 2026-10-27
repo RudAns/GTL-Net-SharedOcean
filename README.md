@@ -1,8 +1,24 @@
+<div align="center">
+
 # 《盗贼之海》式的共享海面
 
-从 Rare 的多人航海游戏《盗贼之海》（Sea of Thieves，2018）的海面到 UE5：FFT 巨浪、船体浮力，以及多人游戏中“每个玩家看到同一片海、同一条船”的同步方案。技术调研 + UE 5.8 可联机的交互复现。
+**Tessendorf FFT 海洋 · 船体浮力 · 确定性海面 · 网络时钟同步 · 服务器权威船体**<br>
+让多人航海游戏里每个玩家看到同一片海、同一条船：技术调研 + UE 5.8 可联机的交互复现
+
+<a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-0a7bbb"></a>
+<img alt="引擎 UE 5.8" src="https://img.shields.io/badge/%E5%BC%95%E6%93%8E-UE_5.8-313131?logo=unrealengine">
+<img alt="代码 C++ · HLSL" src="https://img.shields.io/badge/%E4%BB%A3%E7%A0%81-C%2B%2B_%C2%B7_HLSL-00599c">
+<a href="Docs/Research.html"><img alt="调研 51 篇文献" src="https://img.shields.io/badge/%E8%B0%83%E7%A0%94-51_%E7%AF%87%E6%96%87%E7%8C%AE-e05d44"></a>
+<img alt="联机 支持" src="https://img.shields.io/badge/%E8%81%94%E6%9C%BA-%E6%94%AF%E6%8C%81-8a2be2">
+<img alt="手游 可降级" src="https://img.shields.io/badge/%E6%89%8B%E6%B8%B8-%E5%8F%AF%E9%99%8D%E7%BA%A7-2ea44f">
+
+[📥 下载调研报告](Docs/Research.html) · [📥 下载落地文档](Docs/Implementation.html) · [🎮 运行 Demo](#ue-58-可交互-demo) · [⌨️ 操作说明](#操作)
+
+<br>
 
 [![调研报告封面](Docs/shots/00_research_cover.png)](Docs/Research.html)
+
+</div>
 
 ## 调研报告
 
